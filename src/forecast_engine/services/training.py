@@ -14,6 +14,7 @@ TrainingService
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -27,7 +28,7 @@ import pandas as pd
 import shap
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from forecast_engine.config import settings
@@ -139,14 +140,16 @@ class TrainingService:
         # 2. Resolve hyperparams
         params = {**DEFAULT_HYPERPARAMS, **(hyperparameters or {})}
 
-        # 3. Train final model on all data
+        # 3. Train final model on all data (CPU-heavy, run in thread)
         model = GradientBoostingRegressor(**params, random_state=42)
-        model.fit(X.values, y.values)
+        await asyncio.to_thread(model.fit, X.values, y.values)
 
         # 4. Auto-generate version tag if needed
         if version_tag is None:
-            count_result = await session.execute(select(ModelVersion))
-            existing_count = len(count_result.scalars().all())
+            count_result = await session.execute(
+                select(func.count()).select_from(ModelVersion)
+            )
+            existing_count = count_result.scalar() or 0
             version_tag = _auto_version_tag(existing_count)
 
         # 5. Save artifact
@@ -160,18 +163,18 @@ class TrainingService:
         joblib.dump(artifact, artifact_path)
         logger.info("Model artifact saved to %s", artifact_path)
 
-        # 6. Determine training data date range
-        periods_in_data = df["label"].unique()
-        training_start = df["label"].min()
-        training_end = df["label"].max()
-
-        # Try to extract actual dates from the period labels if possible,
-        # otherwise fall back to today.
-        try:
-            # period labels are typically like "2026-01" etc.
-            training_data_start = date.fromisoformat(training_start + "-01")
-            training_data_end = date.fromisoformat(training_end + "-01")
-        except (ValueError, TypeError):
+        # 6. Determine training data date range from ForecastPeriod dates
+        from forecast_engine.models.program import ForecastPeriod
+        period_dates_result = await session.execute(
+            select(ForecastPeriod.start_date)
+            .where(ForecastPeriod.id.in_(df["period_id"].unique().tolist()))
+            .order_by(ForecastPeriod.start_date)
+        )
+        period_dates = [r[0] for r in period_dates_result.all()]
+        if period_dates:
+            training_data_start = period_dates[0]
+            training_data_end = period_dates[-1]
+        else:
             training_data_start = date.today()
             training_data_end = date.today()
 
@@ -191,8 +194,10 @@ class TrainingService:
         session.add(model_version)
         await session.flush()  # populate model_version.id
 
-        # 8. Run LOGO-CV
-        cv_results = self._run_logo_cv(X, y, groups, params)
+        # 8. Run LOGO-CV (CPU-heavy, run in thread)
+        cv_results = await asyncio.to_thread(
+            self._run_logo_cv, X, y, groups, params
+        )
 
         # Build program_id -> program_id mapping (identity, but keeps API clean)
         program_map = {pid: pid for pid in groups.unique()}

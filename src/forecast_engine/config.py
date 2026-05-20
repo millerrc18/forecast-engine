@@ -21,7 +21,7 @@ class Settings:
 
     # Auth
     secret_key: str = field(
-        default_factory=lambda: os.getenv("SECRET_KEY", "dev-secret-change-in-prod")
+        default_factory=lambda: os.getenv("SECRET_KEY", "")
     )
     session_max_age: int = 28800  # 8 hours
 
@@ -30,8 +30,11 @@ class Settings:
     ldap_base_dn: str = field(default_factory=lambda: os.getenv("LDAP_BASE_DN", ""))
     ldap_domain: str = field(default_factory=lambda: os.getenv("LDAP_DOMAIN", ""))
     auth_dev_mode: bool = field(
-        default_factory=lambda: os.getenv("AUTH_DEV_MODE", "true").lower() == "true"
+        default_factory=lambda: os.getenv("AUTH_DEV_MODE", "false").lower() == "true"
     )
+
+    # Upload constraints
+    max_upload_mb: int = 10
 
     # Role → AD group mapping
     role_group_map: dict[str, str] = field(default_factory=lambda: {

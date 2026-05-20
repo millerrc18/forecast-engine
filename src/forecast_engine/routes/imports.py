@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import shutil
+import asyncio
+import uuid as _uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
@@ -15,6 +16,14 @@ from forecast_engine.models.actuals import DataImport
 from forecast_engine.models.base import async_session
 from forecast_engine.services.importer import import_file
 from forecast_engine.templating import templates
+
+_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+_ALLOWED_MIMES = {
+    "text/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/octet-stream",  # browsers sometimes send this
+}
 
 # ---------------------------------------------------------------------------
 # Page router — HTML views
@@ -58,18 +67,57 @@ async def upload_csv(request: Request, file: UploadFile):
     """Accept a CSV or Excel file upload and run the importer."""
     user = require_auth(request)
 
+    # Validate file extension
+    original_name = Path(file.filename).name if file.filename else "upload"
+    ext = Path(original_name).suffix.lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(_ALLOWED_EXTENSIONS)}",
+        )
+
+    # Validate MIME type
+    if file.content_type and file.content_type not in _ALLOWED_MIMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported content type '{file.content_type}'.",
+        )
+
     # Ensure upload directory exists
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitize filename and write to disk
-    safe_name = Path(file.filename).name if file.filename else "upload"
+    # UUID-prefixed filename to prevent overwrites and path traversal
+    safe_name = f"{_uuid.uuid4().hex[:12]}_{original_name}"
     dest = settings.upload_dir / safe_name
 
-    with dest.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    # Stream to disk with size limit (runs blocking I/O in thread)
+    max_bytes = settings.max_upload_mb * 1024 * 1024
 
-    async with async_session() as session:
-        result = await import_file(dest, "csv_upload", user["id"], session)
+    def _write_with_limit():
+        total = 0
+        with dest.open("wb") as out:
+            while True:
+                chunk = file.file.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    out.close()
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds {settings.max_upload_mb} MB limit.",
+                    )
+                out.write(chunk)
+
+    await asyncio.to_thread(_write_with_limit)
+
+    try:
+        async with async_session() as session:
+            result = await import_file(dest, "csv_upload", user["id"], session)
+    finally:
+        # Clean up uploaded file after import
+        dest.unlink(missing_ok=True)
 
     return result
 

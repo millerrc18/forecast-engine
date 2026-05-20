@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import shap
 
+from forecast_engine.config import settings
 from forecast_engine.models.ml import ModelVersion
 from forecast_engine.services.features import FEATURE_NAMES
 
@@ -165,7 +166,12 @@ class ShapEngine:
         -------
         ShapEngine
         """
-        artifact_path = Path(model_version.artifact_path)
+        artifact_path = Path(model_version.artifact_path).resolve()
+        model_dir = settings.model_dir.resolve()
+        if not str(artifact_path).startswith(str(model_dir)):
+            raise ValueError(
+                f"Artifact path {artifact_path} is outside allowed model_dir {model_dir}"
+            )
         if not artifact_path.exists():
             raise FileNotFoundError(
                 f"Model artifact not found at {artifact_path}"

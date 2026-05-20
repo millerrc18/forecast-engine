@@ -47,10 +47,17 @@ async def dashboard(request: Request):
         )
         has_actuals = actuals_count.scalar_one_or_none() is not None
 
+        # Derive current period from DB
+        latest_period_result = await session.execute(
+            select(ForecastPeriod).order_by(ForecastPeriod.start_date.desc()).limit(1)
+        )
+        latest_period = latest_period_result.scalars().first()
+        current_period = latest_period.label if latest_period else "N/A"
+
     return templates.TemplateResponse(request, "dashboard.html", {
         "user": user,
         "programs": programs,
-        "current_period": "MAY-26",
+        "current_period": current_period,
         "has_actuals": has_actuals,
     })
 
@@ -79,6 +86,8 @@ async def program_detail(request: Request, program_id: str):
 async def forecast_card_partial(request: Request, program_id: str):
     """HTMX partial — single program forecast card."""
     user = get_current_user(request)
+    if not user:
+        return HTMLResponse("", status_code=401)
 
     async with async_session() as session:
         program = await session.get(

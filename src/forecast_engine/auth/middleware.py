@@ -65,6 +65,8 @@ def set_session_cookie(response, user_data: dict):
         max_age=settings.session_max_age,
         httponly=True,
         samesite="lax",
+        secure=not settings.auth_dev_mode,
+        path="/",
     )
 
 

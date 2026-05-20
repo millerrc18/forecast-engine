@@ -13,6 +13,7 @@ ForecastService
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from decimal import Decimal
@@ -23,6 +24,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from forecast_engine.config import settings
 from forecast_engine.models.actuals import ActualHours
 from forecast_engine.models.demand import StaffingAllocation
 from forecast_engine.models.forecast import Forecast
@@ -346,8 +348,15 @@ class ForecastService:
             logger.debug("No active model version — skipping GBM forecast.")
             return None
 
-        # 2. Load the .joblib artifact
-        artifact_path = Path(model_version.artifact_path)
+        # 2. Load the .joblib artifact (constrained to model_dir)
+        artifact_path = Path(model_version.artifact_path).resolve()
+        model_dir = settings.model_dir.resolve()
+        if not str(artifact_path).startswith(str(model_dir)):
+            logger.error(
+                "Model artifact path %s is outside model_dir %s — refusing to load.",
+                artifact_path, model_dir,
+            )
+            return None
         if not artifact_path.exists():
             logger.error(
                 "Model artifact not found at %s — skipping GBM forecast.",
@@ -386,9 +395,11 @@ class ForecastService:
             )
             shap_json = None
 
-        # 6. Bootstrap prediction interval
+        # 6. Bootstrap prediction interval (CPU-heavy, run in thread)
         try:
-            ci_lower, ci_upper = self._bootstrap_interval(model, X)
+            ci_lower, ci_upper = await asyncio.to_thread(
+                self._bootstrap_interval, model, X
+            )
         except Exception:
             logger.warning(
                 "Bootstrap interval failed for program %s — storing without CI.",

@@ -16,6 +16,15 @@ STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown."""
+    if not settings.secret_key:
+        import secrets
+        import logging
+        logging.getLogger(__name__).warning(
+            "SECRET_KEY not set — generating a random key. "
+            "Set SECRET_KEY env var in production."
+        )
+        # Monkey-patch a random key so the app still starts for local dev
+        object.__setattr__(settings, "secret_key", secrets.token_hex(32))
     await init_db()
     settings.model_dir.mkdir(parents=True, exist_ok=True)
     settings.upload_dir.mkdir(parents=True, exist_ok=True)

@@ -414,10 +414,6 @@ class FeatureEngineer:
         fte_map: dict[tuple[str, str], float] = {}
         for period_id, period in periods.items():
             for staff in staff_rows:
-                if staff.program_id != staff.program_id:
-                    # always true — placeholder; real filter below
-                    pass
-
                 # Check if staff record is active during this period
                 if staff.effective_date > period.end_date:
                     continue
