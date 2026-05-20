@@ -1,0 +1,434 @@
+{% extends "base.html" %}
+{% block title %}Model Management — Forecast Engine{% endblock %}
+
+{% block content %}
+<div class="space-y-6" x-data="modelManager()">
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Page Header                                                          -->
+    <!-- ------------------------------------------------------------------ -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gdms-blue">Model Management</h1>
+            <p class="text-gray-500 text-sm mt-1">Train, evaluate, and manage Gradient Boosting forecast models</p>
+        </div>
+        <button @click="trainModel()"
+                :disabled="training"
+                class="inline-flex items-center bg-gdms-blue text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gdms-blue-light transition disabled:opacity-50 disabled:cursor-not-allowed">
+            <!-- Spinner -->
+            <svg x-show="training" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <!-- Icon -->
+            <svg x-show="!training" class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <span x-text="training ? 'Training...' : 'Train New Model'"></span>
+        </button>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Training feedback banner                                             -->
+    <!-- ------------------------------------------------------------------ -->
+    <div x-show="trainResult" x-cloak class="rounded-lg border border-green-200 bg-green-50 p-4">
+        <div class="flex items-start gap-3">
+            <svg class="h-5 w-5 text-green-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+                <p class="text-sm font-semibold text-green-800">Training complete</p>
+                <p class="text-xs text-green-700 mt-1">
+                    Model <span class="font-mono font-medium" x-text="trainResult?.version_tag"></span> trained successfully.
+                    <a href="/models" class="underline ml-1">Refresh</a> to see updated results.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="trainError" x-cloak class="rounded-lg border border-red-200 bg-red-50 p-4">
+        <div class="flex items-start gap-3">
+            <svg class="h-5 w-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+                <p class="text-sm font-semibold text-red-800">Training failed</p>
+                <p class="text-xs text-red-700 mt-1" x-text="trainError"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Active Model Highlight Card                                          -->
+    <!-- ------------------------------------------------------------------ -->
+    {% if active_model %}
+    <div class="bg-white rounded-lg shadow-sm border-2 border-accent-green p-5">
+        <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-accent-green text-white">
+                    ACTIVE
+                </span>
+                <h2 class="text-lg font-bold text-gdms-blue">{{ active_model.version_tag }}</h2>
+                <span class="text-xs text-gray-400 font-mono">{{ active_model.algorithm }}</span>
+            </div>
+            <div class="text-xs text-gray-400">
+                Trained {{ active_model.trained_at.strftime('%Y-%m-%d %H:%M') if active_model.trained_at else 'N/A' }}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <!-- MAPE -->
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">MAPE</p>
+                <p class="text-xl font-bold mt-1 {% if active_model.mape is not none and active_model.mape <= 15 %}text-accent-green{% elif active_model.mape is not none and active_model.mape <= 25 %}text-accent-amber{% else %}text-accent-red{% endif %}">
+                    {{ '%.1f' % active_model.mape if active_model.mape is not none else '—' }}%
+                </p>
+            </div>
+            <!-- MAE -->
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">MAE</p>
+                <p class="text-xl font-bold mt-1 text-gdms-blue">
+                    {{ '%.1f' % active_model.mae if active_model.mae is not none else '—' }}
+                </p>
+            </div>
+            <!-- RMSE -->
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">RMSE</p>
+                <p class="text-xl font-bold mt-1 text-gdms-blue">
+                    {{ '%.1f' % active_model.rmse if active_model.rmse is not none else '—' }}
+                </p>
+            </div>
+            <!-- R-squared -->
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">R&sup2;</p>
+                <p class="text-xl font-bold mt-1 {% if active_model.r2 is not none and active_model.r2 >= 0.8 %}text-accent-green{% elif active_model.r2 is not none and active_model.r2 >= 0.6 %}text-accent-amber{% else %}text-accent-red{% endif %}">
+                    {{ '%.3f' % active_model.r2 if active_model.r2 is not none else '—' }}
+                </p>
+            </div>
+        </div>
+
+        <div class="mt-3 text-xs text-gray-400">
+            {{ active_model.n_observations }} observations across {{ active_model.n_programs }} programs
+        </div>
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg shadow-sm border border-dashed border-gray-300 p-6 text-center">
+        <svg class="w-10 h-10 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-sm text-gray-500 font-medium">No active model</p>
+        <p class="text-xs text-gray-400 mt-1">Train a model and activate it to begin generating ML forecasts.</p>
+    </div>
+    {% endif %}
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Feature Importance Chart                                             -->
+    <!-- ------------------------------------------------------------------ -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-base font-semibold text-gray-800">Feature Importance</h2>
+            {% if active_model %}
+            <button @click="loadFeatures('{{ active_model.id }}')"
+                    class="text-xs text-gdms-blue hover:underline font-medium">
+                Load for active model
+            </button>
+            {% endif %}
+        </div>
+        <div id="feature-chart" class="w-full" style="min-height: 320px;">
+            <div x-show="!featuresLoaded" class="flex items-center justify-center h-80 text-gray-400 text-sm">
+                <div class="text-center">
+                    <svg class="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    <p>Click "Load for active model" to view feature importances</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Model Versions Table                                                 -->
+    <!-- ------------------------------------------------------------------ -->
+    <div>
+        <h2 class="text-base font-semibold text-gray-800 mb-3">All Model Versions</h2>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            {% if models %}
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gdms-blue text-white">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-medium">Version</th>
+                        <th class="px-4 py-3 text-left font-medium">Algorithm</th>
+                        <th class="px-4 py-3 text-left font-medium">Trained</th>
+                        <th class="px-4 py-3 text-right font-medium">Observations</th>
+                        <th class="px-4 py-3 text-right font-medium">Programs</th>
+                        <th class="px-4 py-3 text-right font-medium">MAPE</th>
+                        <th class="px-4 py-3 text-center font-medium">Status</th>
+                        <th class="px-4 py-3 text-center font-medium">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for model in models %}
+                    <tr class="hover:bg-gray-50 transition {% if model.is_active %}bg-green-50{% endif %}">
+                        <!-- Version tag -->
+                        <td class="px-4 py-3">
+                            <span class="font-mono font-semibold text-gdms-blue text-xs">{{ model.version_tag }}</span>
+                        </td>
+
+                        <!-- Algorithm -->
+                        <td class="px-4 py-3 text-gray-500 text-xs">
+                            {{ model.algorithm }}
+                        </td>
+
+                        <!-- Trained at -->
+                        <td class="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
+                            {{ model.trained_at.strftime('%Y-%m-%d %H:%M') if model.trained_at else '—' }}
+                        </td>
+
+                        <!-- Observations -->
+                        <td class="px-4 py-3 text-right font-medium text-gray-800">
+                            {{ '{:,}'.format(model.n_observations) }}
+                        </td>
+
+                        <!-- Programs -->
+                        <td class="px-4 py-3 text-right text-gray-600">
+                            {{ model.n_programs }}
+                        </td>
+
+                        <!-- MAPE -->
+                        <td class="px-4 py-3 text-right">
+                            {% if model.mape is not none %}
+                            <span class="font-semibold {% if model.mape <= 15 %}text-accent-green{% elif model.mape <= 25 %}text-accent-amber{% else %}text-accent-red{% endif %}">
+                                {{ '%.1f' % model.mape }}%
+                            </span>
+                            {% else %}
+                            <span class="text-gray-400">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Status badge -->
+                        <td class="px-4 py-3 text-center">
+                            {% if model.is_active %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Active
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                Inactive
+                            </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Actions -->
+                        <td class="px-4 py-3 text-center">
+                            <div class="flex items-center justify-center gap-2">
+                                {% if not model.is_active %}
+                                <button @click="activateModel('{{ model.id }}', '{{ model.version_tag }}')"
+                                        class="text-xs text-gdms-blue hover:text-gdms-blue-light font-medium hover:underline">
+                                    Activate
+                                </button>
+                                {% endif %}
+                                <button @click="loadFeatures('{{ model.id }}')"
+                                        class="text-xs text-gray-500 hover:text-gdms-blue font-medium hover:underline">
+                                    Features
+                                </button>
+                                <button @click="viewMetrics('{{ model.id }}', '{{ model.version_tag }}')"
+                                        class="text-xs text-gray-500 hover:text-gdms-blue font-medium hover:underline">
+                                    Metrics
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="p-10 text-center text-gray-400">
+                <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                </svg>
+                <p class="text-sm">No models trained yet.</p>
+                <p class="text-xs mt-1">Click "Train New Model" to train your first Gradient Boosting model.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Metrics Detail Modal                                                 -->
+    <!-- ------------------------------------------------------------------ -->
+    <div x-show="metricsModalOpen" x-cloak
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         @click.self="metricsModalOpen = false">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto">
+            <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+                <h3 class="text-base font-semibold text-gdms-blue">
+                    Metrics — <span class="font-mono" x-text="metricsModelTag"></span>
+                </h3>
+                <button @click="metricsModalOpen = false" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-5">
+                <div x-show="metricsLoading" class="text-center py-8 text-gray-400 text-sm">Loading metrics...</div>
+                <table x-show="!metricsLoading && metricsData.length > 0" class="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left font-medium text-gray-600">Metric</th>
+                            <th class="px-4 py-2 text-left font-medium text-gray-600">Scope</th>
+                            <th class="px-4 py-2 text-right font-medium text-gray-600">Value</th>
+                            <th class="px-4 py-2 text-left font-medium text-gray-600">CV Method</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <template x-for="m in metricsData" :key="m.id">
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 font-mono text-xs uppercase" x-text="m.metric_name"></td>
+                                <td class="px-4 py-2 text-xs text-gray-500" x-text="m.program_id ? m.program_id : 'Overall'"></td>
+                                <td class="px-4 py-2 text-right font-semibold" x-text="m.metric_value !== null ? m.metric_value.toFixed(4) : '—'"></td>
+                                <td class="px-4 py-2 text-xs text-gray-400" x-text="m.cv_method"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div x-show="!metricsLoading && metricsData.length === 0" class="text-center py-8 text-gray-400 text-sm">
+                    No metrics found for this model.
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function modelManager() {
+    return {
+        training: false,
+        trainResult: null,
+        trainError: null,
+        featuresLoaded: false,
+        metricsModalOpen: false,
+        metricsModelTag: '',
+        metricsData: [],
+        metricsLoading: false,
+
+        async trainModel() {
+            this.training = true;
+            this.trainResult = null;
+            this.trainError = null;
+            try {
+                const resp = await fetch('/api/models/retrain', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    this.trainError = data.detail || 'Training failed.';
+                } else {
+                    this.trainResult = data;
+                }
+            } catch (e) {
+                this.trainError = 'Network error — could not reach server.';
+            } finally {
+                this.training = false;
+            }
+        },
+
+        async activateModel(modelId, versionTag) {
+            if (!confirm(`Activate model ${versionTag} as the production model?`)) return;
+            try {
+                const resp = await fetch(`/api/models/${modelId}/activate`, { method: 'POST' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    window.location.reload();
+                } else {
+                    alert(data.detail || 'Activation failed.');
+                }
+            } catch (e) {
+                alert('Network error — could not reach server.');
+            }
+        },
+
+        async loadFeatures(modelId) {
+            try {
+                const resp = await fetch(`/api/models/${modelId}/features`);
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    alert(err.detail || 'Failed to load features.');
+                    return;
+                }
+                const features = await resp.json();
+
+                // Sort by rank ascending (most important first)
+                features.sort((a, b) => a.rank_importance - b.rank_importance);
+
+                const names = features.map(f => f.feature_name.replace(/_/g, ' '));
+                const importances = features.map(f => f.importance);
+                const shapValues = features.map(f => f.mean_shap);
+
+                // Reverse for horizontal bar chart (top = most important)
+                names.reverse();
+                importances.reverse();
+                shapValues.reverse();
+
+                const trace = {
+                    y: names,
+                    x: importances,
+                    type: 'bar',
+                    orientation: 'h',
+                    marker: {
+                        color: '#1B3A5C',
+                    },
+                    hovertemplate: '<b>%{y}</b><br>Gini: %{x:.4f}<extra></extra>',
+                };
+
+                const layout = {
+                    margin: { l: 180, r: 30, t: 10, b: 40 },
+                    xaxis: {
+                        title: 'Gini Importance',
+                        gridcolor: '#f0f0f0',
+                    },
+                    yaxis: {
+                        automargin: true,
+                    },
+                    plot_bgcolor: '#ffffff',
+                    paper_bgcolor: '#ffffff',
+                    font: { family: 'Inter, system-ui, sans-serif', size: 11 },
+                    height: Math.max(320, features.length * 28),
+                };
+
+                Plotly.newPlot('feature-chart', [trace], layout, {
+                    responsive: true,
+                    displayModeBar: false,
+                });
+
+                this.featuresLoaded = true;
+            } catch (e) {
+                alert('Failed to load feature importances.');
+            }
+        },
+
+        async viewMetrics(modelId, versionTag) {
+            this.metricsModalOpen = true;
+            this.metricsModelTag = versionTag;
+            this.metricsData = [];
+            this.metricsLoading = true;
+            try {
+                const resp = await fetch(`/api/models/${modelId}/metrics`);
+                if (resp.ok) {
+                    this.metricsData = await resp.json();
+                }
+            } catch (e) {
+                // silent
+            } finally {
+                this.metricsLoading = false;
+            }
+        },
+    };
+}
+</script>
+{% endblock %}

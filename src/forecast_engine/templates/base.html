@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Forecast Engine{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'gdms-blue': '#1B3A5C',
+                        'gdms-blue-light': '#2A5A8C',
+                        'accent-green': '#548235',
+                        'accent-red': '#C00000',
+                        'accent-amber': '#BF8F00',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
+        .htmx-request .htmx-indicator { opacity: 1; }
+        .htmx-request.htmx-indicator { opacity: 1; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="h-full" x-data="{ sidebarOpen: false }">
+
+    {% if user %}
+    <!-- Nav -->
+    <nav class="bg-gdms-blue shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-14">
+                <div class="flex items-center space-x-8">
+                    <a href="/dashboard" class="text-white font-bold text-lg tracking-tight">
+                        Forecast Engine
+                    </a>
+                    <div class="hidden md:flex space-x-1">
+                        <a href="/dashboard"
+                           class="text-gray-200 hover:text-white hover:bg-gdms-blue-light px-3 py-2 rounded text-sm font-medium transition">
+                            Dashboard
+                        </a>
+                        {% if user.role in ('pm', 'admin') %}
+                        <a href="/demand-signals"
+                           class="text-gray-200 hover:text-white hover:bg-gdms-blue-light px-3 py-2 rounded text-sm font-medium transition">
+                            Demand Signals
+                        </a>
+                        {% endif %}
+                        {% if user.role in ('func_mgr', 'admin') %}
+                        <a href="/staffing"
+                           class="text-gray-200 hover:text-white hover:bg-gdms-blue-light px-3 py-2 rounded text-sm font-medium transition">
+                            Staffing
+                        </a>
+                        {% endif %}
+                        {% if user.role in ('leadership', 'admin') %}
+                        <a href="/leadership"
+                           class="text-gray-200 hover:text-white hover:bg-gdms-blue-light px-3 py-2 rounded text-sm font-medium transition">
+                            Leadership
+                        </a>
+                        {% endif %}
+                        {% if user.role in ('pm', 'admin') %}
+                        <a href="/import"
+                           class="text-gray-200 hover:text-white hover:bg-gdms-blue-light px-3 py-2 rounded text-sm font-medium transition">
+                            Import
+                        </a>
+                        {% endif %}
+                        {% if user.role == 'admin' %}
+                        <a href="/models"
+                           class="text-gray-200 hover:text-white hover:bg-gdms-blue-light px-3 py-2 rounded text-sm font-medium transition">
+                            Models
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="text-gray-300 text-sm">
+                        {{ user.display_name }}
+                        <span class="text-xs text-gray-400 ml-1">({{ user.role }})</span>
+                    </span>
+                    <a href="/auth/logout"
+                       class="text-gray-300 hover:text-white text-sm font-medium transition">
+                        Logout
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Toast notifications -->
+    <div id="toast-container"
+         class="fixed bottom-4 right-4 z-50 space-y-2"
+         x-data="{ toasts: [] }">
+    </div>
+
+    <script src="/static/js/charts.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

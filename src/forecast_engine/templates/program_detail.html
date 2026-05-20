@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ program.code }} — {{ program.name }} — Forecast Engine{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <a href="/dashboard" class="text-sm text-gray-400 hover:text-gdms-blue">&larr; Dashboard</a>
+            <h1 class="text-2xl font-bold text-gdms-blue mt-1">{{ program.code }} — {{ program.name }}</h1>
+            <p class="text-gray-500 text-sm">
+                {% if program.pm_user %}PM: {{ program.pm_user.display_name }}{% endif %}
+                | Status: {{ program.status }}
+                {% if program.contract_type %} | {{ program.contract_type }}{% endif %}
+            </p>
+        </div>
+        <div class="flex space-x-2">
+            {% if user.role in ('pm', 'admin') %}
+            <a href="/demand-signals?program={{ program.id }}"
+               class="bg-gdms-blue text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gdms-blue-light transition">
+                Demand Signal
+            </a>
+            {% endif %}
+            <button class="border border-gdms-blue text-gdms-blue px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition">
+                Export EAC
+            </button>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div x-data="{ tab: 'forecast' }" class="space-y-4">
+        <div class="border-b border-gray-200">
+            <nav class="flex space-x-6">
+                <button @click="tab = 'forecast'"
+                        :class="tab === 'forecast' ? 'border-gdms-blue text-gdms-blue' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                        class="border-b-2 pb-2 text-sm font-medium transition">
+                    Forecast
+                </button>
+                <button @click="tab = 'shap'"
+                        :class="tab === 'shap' ? 'border-gdms-blue text-gdms-blue' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                        class="border-b-2 pb-2 text-sm font-medium transition">
+                    SHAP Analysis
+                </button>
+                <button @click="tab = 'history'"
+                        :class="tab === 'history' ? 'border-gdms-blue text-gdms-blue' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                        class="border-b-2 pb-2 text-sm font-medium transition">
+                    History
+                </button>
+                <button @click="tab = 'staffing'"
+                        :class="tab === 'staffing' ? 'border-gdms-blue text-gdms-blue' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                        class="border-b-2 pb-2 text-sm font-medium transition">
+                    Staffing
+                </button>
+                <button @click="tab = 'variance'"
+                        :class="tab === 'variance' ? 'border-gdms-blue text-gdms-blue' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                        class="border-b-2 pb-2 text-sm font-medium transition">
+                    Variance
+                </button>
+            </nav>
+        </div>
+
+        <!-- Forecast Tab -->
+        <div x-show="tab === 'forecast'" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h3 class="font-semibold text-gdms-blue mb-4">Forecast Comparison</h3>
+            <p class="text-gray-400 text-sm">Forecast data will appear here once actuals are imported and forecasts are generated.</p>
+        </div>
+
+        <!-- SHAP Tab -->
+        <div x-show="tab === 'shap'" x-cloak class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h3 class="font-semibold text-gdms-blue mb-4">SHAP Feature Contributions</h3>
+            <div id="shap-waterfall" class="h-80">
+                <p class="text-gray-400 text-sm">SHAP waterfall chart will render when a GBM forecast is available.</p>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div x-show="tab === 'history'" x-cloak class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h3 class="font-semibold text-gdms-blue mb-4">Historical Accuracy</h3>
+            <div id="history-chart" class="h-72">
+                <p class="text-gray-400 text-sm">Trend chart will render when historical data is available.</p>
+            </div>
+        </div>
+
+        <!-- Staffing Tab -->
+        <div x-show="tab === 'staffing'" x-cloak class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h3 class="font-semibold text-gdms-blue mb-4">Current Staffing</h3>
+            <p class="text-gray-400 text-sm">Staffing allocation data will appear once demand signals and allocations are created.</p>
+        </div>
+
+        <!-- Variance Tab -->
+        <div x-show="tab === 'variance'" x-cloak class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h3 class="font-semibold text-gdms-blue mb-4">Variance History</h3>
+            <p class="text-gray-400 text-sm">Variance tracking will appear once forecasts and actuals are compared.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Override Modal -->
+<div id="override-modal"></div>
+{% endblock %}

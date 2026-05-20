@@ -1,0 +1,7 @@
+program,period,cost_pool,hours,person,rate,activity_type
+531335,JAN-25,BAMTL,142.5,Smith John,48.50,PROD
+531335,JAN-25,ENGTL,98.0,Jones Sarah,52.00,PROD
+531335,JAN-25,MFGTL,320.0,Williams Mike,42.00,PROD
+531335,JAN-25,BAMTL,24.0,Smith John,48.50,FAI
+C48178,JAN-25,BAMTL,88.5,Brown Lisa,48.50,PROD
+C48178,JAN-25,ENGTL,64.0,Davis Tom,52.00,NRE

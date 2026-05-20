@@ -1,0 +1,414 @@
+{% extends "base.html" %}
+{% block title %}Data Import — Forecast Engine{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Page Header                                                          -->
+    <!-- ------------------------------------------------------------------ -->
+    <div>
+        <h1 class="text-2xl font-bold text-gdms-blue">Data Import</h1>
+        <p class="text-gray-500 text-sm mt-1">Upload labor hours — CSV or Excel exports from Unanet or Oracle</p>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Upload Section                                                       -->
+    <!-- ------------------------------------------------------------------ -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6"
+         x-data="{
+             dragging: false,
+             uploading: false,
+             result: null,
+             error: null,
+
+             handleDrop(event) {
+                 this.dragging = false;
+                 const file = event.dataTransfer.files[0];
+                 if (file) this.upload(file);
+             },
+
+             handleFileInput(event) {
+                 const file = event.target.files[0];
+                 if (file) this.upload(file);
+             },
+
+             async upload(file) {
+                 this.uploading = true;
+                 this.result = null;
+                 this.error = null;
+                 const formData = new FormData();
+                 formData.append('file', file);
+                 try {
+                     const resp = await fetch('/api/import/csv', { method: 'POST', body: formData });
+                     const data = await resp.json();
+                     this.uploading = false;
+                     if (data.status === 'failed') {
+                         this.error = data;
+                     } else {
+                         this.result = data;
+                     }
+                 } catch (e) {
+                     this.uploading = false;
+                     this.error = { warnings: ['Network error — could not reach server. Please try again.'] };
+                 }
+             }
+         }">
+
+        <h2 class="text-base font-semibold text-gray-800 mb-4">Upload File</h2>
+
+        <!-- Drag-and-drop zone -->
+        <div class="relative"
+             @dragover.prevent="dragging = true"
+             @dragleave.prevent="dragging = false"
+             @drop.prevent="handleDrop($event)">
+
+            <label for="file-input"
+                   :class="dragging
+                       ? 'border-gdms-blue bg-blue-50'
+                       : 'border-gray-300 bg-gray-50 hover:border-gdms-blue hover:bg-blue-50'"
+                   class="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors">
+
+                <!-- Idle state -->
+                <div x-show="!uploading" class="text-center px-4">
+                    <svg class="mx-auto h-10 w-10 mb-2"
+                         :class="dragging ? 'text-gdms-blue' : 'text-gray-300'"
+                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <p class="text-sm text-gray-600 font-medium">
+                        <span :class="dragging ? 'text-gdms-blue' : ''">
+                            Drop file here or <span class="text-gdms-blue underline">browse</span>
+                        </span>
+                    </p>
+                    <p class="text-xs text-gray-400 mt-1">Accepts .csv and .xlsx — Unanet pivot exports, Oracle CSV extracts</p>
+                </div>
+
+                <!-- Uploading state -->
+                <div x-show="uploading" class="text-center px-4">
+                    <svg class="animate-spin mx-auto h-8 w-8 text-gdms-blue mb-2"
+                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    <p class="text-sm text-gdms-blue font-medium">Uploading and processing...</p>
+                </div>
+            </label>
+
+            <input id="file-input"
+                   type="file"
+                   accept=".csv,.xlsx,.xls"
+                   class="hidden"
+                   @change="handleFileInput($event)"
+                   :disabled="uploading">
+        </div>
+
+        <!-- Success result -->
+        <div x-show="result" x-cloak class="mt-4 rounded-lg border border-green-200 bg-green-50 p-4">
+            <div class="flex items-start gap-3">
+                <svg class="h-5 w-5 text-green-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span x-show="result && result.status === 'success'"
+                              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Success
+                        </span>
+                        <span x-show="result && result.status === 'partial'"
+                              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            Partial
+                        </span>
+                        <span class="text-sm font-semibold text-gray-800">
+                            Import complete
+                        </span>
+                    </div>
+                    <div class="mt-1 flex items-center gap-4 text-sm text-gray-600 flex-wrap">
+                        <span>
+                            <span class="font-medium text-green-700" x-text="result ? result.rows_imported : 0"></span>
+                            rows imported
+                        </span>
+                        <span x-show="result && result.rows_skipped > 0" class="text-yellow-700">
+                            <span class="font-medium" x-text="result ? result.rows_skipped : 0"></span>
+                            rows skipped
+                        </span>
+                        <span x-show="result && result.periods && result.periods.length > 0" class="text-gray-500 text-xs">
+                            Periods: <span x-text="result ? result.periods.join(', ') : ''"></span>
+                        </span>
+                        <span x-show="result && result.programs && result.programs.length > 0" class="text-gray-500 text-xs">
+                            Programs: <span x-text="result ? result.programs.join(', ') : ''"></span>
+                        </span>
+                    </div>
+                    <!-- Warnings -->
+                    <div x-show="result && result.warnings && result.warnings.length > 0" class="mt-2">
+                        <p class="text-xs font-medium text-yellow-700 mb-1">Warnings:</p>
+                        <ul class="space-y-0.5">
+                            <template x-for="w in (result ? result.warnings : [])" :key="w">
+                                <li class="text-xs text-yellow-700 font-mono bg-yellow-50 rounded px-2 py-0.5" x-text="w"></li>
+                            </template>
+                        </ul>
+                    </div>
+                    <!-- Refresh prompt -->
+                    <p class="text-xs text-gray-400 mt-2">
+                        <a href="/import" class="text-gdms-blue hover:underline">Refresh page</a> to see updated history.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error result -->
+        <div x-show="error" x-cloak class="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+            <div class="flex items-start gap-3">
+                <svg class="h-5 w-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            Failed
+                        </span>
+                        <span class="text-sm font-semibold text-gray-800">Import failed</span>
+                    </div>
+                    <div x-show="error && error.warnings && error.warnings.length > 0" class="mt-2">
+                        <ul class="space-y-0.5">
+                            <template x-for="w in (error ? error.warnings : [])" :key="w">
+                                <li class="text-xs text-red-700 font-mono bg-red-50 rounded px-2 py-0.5 break-words" x-text="w"></li>
+                            </template>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Download Template + Help                                              -->
+    <!-- ------------------------------------------------------------------ -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5 space-y-4">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-sm font-semibold text-gray-700">CSV Template</h2>
+                <p class="text-xs text-gray-400 mt-0.5">
+                    Download and fill in the template, then upload above.
+                </p>
+            </div>
+            <a href="/static/templates/import_template.csv"
+               download="forecast_engine_import_template.csv"
+               class="inline-flex items-center gap-1.5 bg-gdms-blue text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gdms-blue-light transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                Download Template
+            </a>
+        </div>
+
+        <!-- Column reference -->
+        <div x-data="{ helpOpen: false }">
+            <button @click="helpOpen = !helpOpen" class="text-xs text-gdms-blue hover:underline font-medium flex items-center gap-1">
+                <svg class="w-3.5 h-3.5 transition-transform" :class="helpOpen ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+                Column reference and format guide
+            </button>
+            <div x-show="helpOpen" x-cloak class="mt-3 space-y-3 text-xs text-gray-600">
+
+                <div>
+                    <p class="font-semibold text-gray-700 mb-1">Required columns</p>
+                    <table class="w-full text-left border border-gray-200 rounded">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-3 py-1.5 font-medium">Column</th>
+                                <th class="px-3 py-1.5 font-medium">Accepted header names</th>
+                                <th class="px-3 py-1.5 font-medium">Example</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <tr>
+                                <td class="px-3 py-1.5 font-mono">program</td>
+                                <td class="px-3 py-1.5">program, project, charge_no, charge_#, project_code</td>
+                                <td class="px-3 py-1.5 font-mono">531335</td>
+                            </tr>
+                            <tr>
+                                <td class="px-3 py-1.5 font-mono">period</td>
+                                <td class="px-3 py-1.5">period, month, fiscal_period</td>
+                                <td class="px-3 py-1.5 font-mono">JAN-25</td>
+                            </tr>
+                            <tr>
+                                <td class="px-3 py-1.5 font-mono">cost_pool</td>
+                                <td class="px-3 py-1.5">cost_pool, costpool, labor_category, cost_element</td>
+                                <td class="px-3 py-1.5 font-mono">BAMTL</td>
+                            </tr>
+                            <tr>
+                                <td class="px-3 py-1.5 font-mono">hours</td>
+                                <td class="px-3 py-1.5">hours, total_hours, hrs, quantity</td>
+                                <td class="px-3 py-1.5 font-mono">142.5</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <p class="font-semibold text-gray-700 mb-1">Optional columns</p>
+                    <table class="w-full text-left border border-gray-200 rounded">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-3 py-1.5 font-medium">Column</th>
+                                <th class="px-3 py-1.5 font-medium">Purpose</th>
+                                <th class="px-3 py-1.5 font-medium">Example</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <tr>
+                                <td class="px-3 py-1.5 font-mono">person</td>
+                                <td class="px-3 py-1.5">Distinct count = headcount for that group</td>
+                                <td class="px-3 py-1.5 font-mono">Smith John</td>
+                            </tr>
+                            <tr>
+                                <td class="px-3 py-1.5 font-mono">rate</td>
+                                <td class="px-3 py-1.5">Hourly rate for cost calculation</td>
+                                <td class="px-3 py-1.5 font-mono">48.50</td>
+                            </tr>
+                            <tr>
+                                <td class="px-3 py-1.5 font-mono">activity_type</td>
+                                <td class="px-3 py-1.5">Defaults to PROD if omitted</td>
+                                <td class="px-3 py-1.5 font-mono">FAI</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <p class="font-semibold text-gray-700 mb-1">Period formats</p>
+                        <ul class="space-y-0.5 text-gray-500 font-mono">
+                            <li>JAN-25</li>
+                            <li>Jan 2025</li>
+                            <li>January 2025</li>
+                            <li>2025-01</li>
+                            <li>01/2025</li>
+                            <li>2501</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-gray-700 mb-1">Cost pools</p>
+                        <ul class="space-y-0.5 text-gray-500 font-mono">
+                            <li>BAMTL (or BAM, BA)</li>
+                            <li>ENGTL (or ENG, Engineering)</li>
+                            <li>MFGTL (or MFG, Manufacturing)</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-gray-700 mb-1">Activity types</p>
+                        <ul class="space-y-0.5 text-gray-500 font-mono">
+                            <li>PROD (default)</li>
+                            <li>FAI, NRE, ECO</li>
+                            <li>REWORK, QUAL, TRANS</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                    <p class="font-semibold text-gdms-blue mb-1">How grouping works</p>
+                    <p class="text-gray-600">
+                        Rows are grouped by (program, period, cost_pool, activity_type). If your data has one row per person per month,
+                        the importer automatically sums hours and counts distinct persons for headcount. Re-importing the same data
+                        updates existing records rather than creating duplicates.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Import History Table                                                 -->
+    <!-- ------------------------------------------------------------------ -->
+    <div>
+        <h2 class="text-base font-semibold text-gray-800 mb-3">Import History</h2>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            {% if imports %}
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gdms-blue text-white">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-medium">Date</th>
+                        <th class="px-4 py-3 text-left font-medium">Source</th>
+                        <th class="px-4 py-3 text-left font-medium">Filename</th>
+                        <th class="px-4 py-3 text-right font-medium">Rows Imported</th>
+                        <th class="px-4 py-3 text-right font-medium">Rows Skipped</th>
+                        <th class="px-4 py-3 text-center font-medium">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for imp in imports %}
+                    <tr class="hover:bg-gray-50 transition">
+                        <!-- Date -->
+                        <td class="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
+                            {{ imp.imported_at.strftime('%Y-%m-%d %H:%M') if imp.imported_at else '—' }}
+                        </td>
+
+                        <!-- Source -->
+                        <td class="px-4 py-3">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gdms-blue text-white">
+                                {{ imp.source }}
+                            </span>
+                        </td>
+
+                        <!-- Filename -->
+                        <td class="px-4 py-3 text-gray-700 font-mono text-xs max-w-xs truncate"
+                            title="{{ imp.filename or '' }}">
+                            {{ imp.filename or '—' }}
+                        </td>
+
+                        <!-- Rows imported -->
+                        <td class="px-4 py-3 text-right font-semibold text-gray-800">
+                            {{ imp.rows_imported }}
+                        </td>
+
+                        <!-- Rows skipped -->
+                        <td class="px-4 py-3 text-right {% if imp.rows_skipped > 0 %}text-yellow-700 font-medium{% else %}text-gray-400{% endif %}">
+                            {{ imp.rows_skipped if imp.rows_skipped > 0 else '—' }}
+                        </td>
+
+                        <!-- Status badge -->
+                        <td class="px-4 py-3 text-center">
+                            {% if imp.status == 'success' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Success
+                            </span>
+                            {% elif imp.status == 'partial' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                Partial
+                            </span>
+                            {% elif imp.status == 'failed' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                Failed
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                {{ imp.status }}
+                            </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="p-10 text-center text-gray-400">
+                <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                </svg>
+                <p class="text-sm">No imports yet.</p>
+                <p class="text-xs mt-1">Upload a CSV or Excel file above to get started.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

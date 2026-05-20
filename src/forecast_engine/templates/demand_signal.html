@@ -1,0 +1,474 @@
+{% extends "base.html" %}
+{% block title %}Demand Signals — Forecast Engine{% endblock %}
+
+{% block content %}
+<div class="space-y-6"
+     x-data="{
+         showModal: false,
+         submitting: false,
+         form: {
+             program_id: '',
+             period_start: '',
+             period_end: '',
+             units_in_flow: '',
+             scope_changes: '',
+             notes: ''
+         },
+         milestones: [],
+         addMilestone() {
+             this.milestones.push({ type: 'PROD', name: '', target_date: '' });
+         },
+         removeMilestone(index) {
+             this.milestones.splice(index, 1);
+         },
+         async saveSignal(submitAfter) {
+             if (!this.form.program_id) { alert('Please select a program.'); return; }
+             if (!this.form.period_start || !this.form.period_end) { alert('Please set the quarter start and end dates.'); return; }
+             this.submitting = true;
+             const payload = {
+                 period_start: this.form.period_start,
+                 period_end: this.form.period_end,
+                 units_in_flow: this.form.units_in_flow ? parseInt(this.form.units_in_flow) : null,
+                 milestones: this.milestones.filter(m => m.name),
+                 scope_changes: this.form.scope_changes || null,
+                 notes: this.form.notes || null,
+             };
+             try {
+                 const resp = await fetch(`/api/programs/${this.form.program_id}/demand-signals`, {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify(payload),
+                 });
+                 if (!resp.ok) {
+                     const err = await resp.json();
+                     alert('Error: ' + (err.detail || 'Could not save demand signal.'));
+                     return;
+                 }
+                 if (submitAfter) {
+                     const created = await resp.json();
+                     const submitResp = await fetch(`/api/demand-signals/${created.id}/submit`, {
+                         method: 'POST',
+                     });
+                     if (!submitResp.ok) {
+                         alert('Saved as draft but could not submit. Please submit from the table.');
+                     }
+                 }
+                 window.location.reload();
+             } catch (e) {
+                 alert('Network error. Please try again.');
+             } finally {
+                 this.submitting = false;
+             }
+         },
+         async submitSignal(signalId) {
+             if (!confirm('Submit this demand signal? It will become read-only.')) return;
+             const resp = await fetch(`/api/demand-signals/${signalId}/submit`, { method: 'POST' });
+             if (resp.ok) { window.location.reload(); }
+             else { const e = await resp.json(); alert('Error: ' + (e.detail || 'Could not submit.')); }
+         },
+         async deleteSignal(signalId) {
+             if (!confirm('Delete this demand signal? This cannot be undone.')) return;
+             const resp = await fetch(`/api/demand-signals/${signalId}`, { method: 'DELETE' });
+             if (resp.ok) { window.location.reload(); }
+             else { const e = await resp.json(); alert('Error: ' + (e.detail || 'Could not delete.')); }
+         },
+         viewSignal: null,
+         viewMilestones: [],
+         showView(signal) {
+             this.viewSignal = signal;
+             this.viewMilestones = signal.milestones ? JSON.parse(signal.milestones) : [];
+         }
+     }">
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Page Header                                                          -->
+    <!-- ------------------------------------------------------------------ -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gdms-blue">Demand Signals</h1>
+            <p class="text-gray-500 text-sm mt-1">Quarterly production plans — units in flow, milestones, and scope</p>
+        </div>
+        {% if user.role in ('pm', 'admin') %}
+        <button @click="showModal = true"
+                class="bg-gdms-blue text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gdms-blue-light transition flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            New Demand Signal
+        </button>
+        {% endif %}
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Demand Signals Table                                                 -->
+    <!-- ------------------------------------------------------------------ -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        {% if signals %}
+        <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gdms-blue text-white">
+                <tr>
+                    <th class="px-4 py-3 text-left font-medium">Program</th>
+                    <th class="px-4 py-3 text-left font-medium">Quarter</th>
+                    <th class="px-4 py-3 text-center font-medium">Units</th>
+                    <th class="px-4 py-3 text-center font-medium">Status</th>
+                    <th class="px-4 py-3 text-left font-medium">Submitted</th>
+                    <th class="px-4 py-3 text-left font-medium">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for signal in signals %}
+                <tr class="hover:bg-gray-50 transition">
+                    <!-- Program -->
+                    <td class="px-4 py-3">
+                        <span class="font-semibold text-gdms-blue">{{ signal.program.code }}</span>
+                        <span class="text-gray-500 ml-1">— {{ signal.program.name }}</span>
+                    </td>
+
+                    <!-- Quarter label derived from period_start -->
+                    <td class="px-4 py-3 text-gray-700 whitespace-nowrap">
+                        {% set ps = signal.period_start %}
+                        {% set pe = signal.period_end %}
+                        {% set m = ps.month %}
+                        {% if m in (1, 2, 3) %}{% set q = 1 %}
+                        {% elif m in (4, 5, 6) %}{% set q = 2 %}
+                        {% elif m in (7, 8, 9) %}{% set q = 3 %}
+                        {% else %}{% set q = 4 %}{% endif %}
+                        Q{{ q }} FY{{ ps.year % 100 }}
+                        <span class="text-gray-400 text-xs ml-1">({{ ps.strftime('%b %d') }}–{{ pe.strftime('%b %d') }})</span>
+                    </td>
+
+                    <!-- Units in flow -->
+                    <td class="px-4 py-3 text-center text-gray-700">
+                        {{ signal.units_in_flow if signal.units_in_flow is not none else '—' }}
+                    </td>
+
+                    <!-- Status badge -->
+                    <td class="px-4 py-3 text-center">
+                        {% if signal.status == 'draft' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                            Draft
+                        </span>
+                        {% elif signal.status == 'submitted' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            Submitted
+                        </span>
+                        {% elif signal.status == 'acknowledged' %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Acknowledged
+                        </span>
+                        {% endif %}
+                    </td>
+
+                    <!-- Created at -->
+                    <td class="px-4 py-3 text-gray-500 text-xs">
+                        {{ signal.created_at.strftime('%Y-%m-%d') if signal.created_at else '—' }}
+                    </td>
+
+                    <!-- Actions -->
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            {% if signal.status == 'draft' %}
+                            <button @click="submitSignal('{{ signal.id }}')"
+                                    class="text-blue-600 hover:text-blue-800 text-xs font-medium">
+                                Submit
+                            </button>
+                            <span class="text-gray-300">|</span>
+                            {% endif %}
+                            <button @click="showView({
+                                        program: '{{ signal.program.code }} — {{ signal.program.name }}',
+                                        quarter: 'Q{{ ((signal.period_start.month - 1) // 3) + 1 }} FY{{ signal.period_start.year % 100 }}',
+                                        period_start: '{{ signal.period_start.strftime('%Y-%m-%d') }}',
+                                        period_end: '{{ signal.period_end.strftime('%Y-%m-%d') }}',
+                                        units_in_flow: {{ signal.units_in_flow if signal.units_in_flow is not none else 'null' }},
+                                        milestones: '{{ signal.milestones|default('[]', true)|e }}',
+                                        scope_changes: `{{ signal.scope_changes|default('', true)|e }}`,
+                                        notes: `{{ signal.notes|default('', true)|e }}`,
+                                        status: '{{ signal.status }}',
+                                        created: '{{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else '' }}'
+                                    })"
+                                    class="text-gdms-blue hover:text-gdms-blue-light text-xs font-medium">
+                                View
+                            </button>
+                            <span class="text-gray-300">|</span>
+                            <button @click="deleteSignal('{{ signal.id }}')"
+                                    class="text-red-500 hover:text-red-700 text-xs font-medium">
+                                Delete
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="p-10 text-center text-gray-400">
+            <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/>
+            </svg>
+            <p class="text-sm">No demand signals yet.</p>
+            {% if user.role in ('pm', 'admin') %}
+            <p class="text-xs mt-1">Click <strong>New Demand Signal</strong> to submit your first quarterly plan.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- New Demand Signal Modal                                              -->
+    <!-- ------------------------------------------------------------------ -->
+    <div x-show="showModal"
+         x-cloak
+         class="fixed inset-0 z-50 overflow-y-auto"
+         @keydown.escape.window="showModal = false">
+
+        <!-- Backdrop -->
+        <div class="fixed inset-0 bg-black bg-opacity-40 transition-opacity"
+             @click="showModal = false"></div>
+
+        <!-- Panel -->
+        <div class="relative min-h-screen flex items-start justify-center pt-12 pb-20 px-4">
+            <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl"
+                 @click.stop>
+
+                <!-- Modal header -->
+                <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gdms-blue rounded-t-xl">
+                    <h2 class="text-lg font-semibold text-white">New Demand Signal</h2>
+                    <button @click="showModal = false"
+                            class="text-blue-200 hover:text-white transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Modal body -->
+                <div class="px-6 py-5 space-y-5 overflow-y-auto max-h-[70vh]">
+
+                    <!-- Program -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Program <span class="text-red-500">*</span></label>
+                        <select x-model="form.program_id"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue">
+                            <option value="">— Select program —</option>
+                            {% for program in programs %}
+                            <option value="{{ program.id }}">{{ program.code }} — {{ program.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Quarter dates -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Quarter Start <span class="text-red-500">*</span></label>
+                            <input type="date" x-model="form.period_start"
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue"/>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Quarter End <span class="text-red-500">*</span></label>
+                            <input type="date" x-model="form.period_end"
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue"/>
+                        </div>
+                    </div>
+
+                    <!-- Units in flow -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Units in Flow</label>
+                        <input type="number" min="0" x-model="form.units_in_flow"
+                               placeholder="Planned production units"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue"/>
+                        <p class="text-xs text-gray-400 mt-1">Planned units in production during the quarter</p>
+                    </div>
+
+                    <!-- Milestones -->
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="block text-sm font-medium text-gray-700">Milestones</label>
+                            <button type="button"
+                                    @click="addMilestone()"
+                                    class="text-xs text-gdms-blue hover:text-gdms-blue-light font-medium flex items-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                </svg>
+                                Add Milestone
+                            </button>
+                        </div>
+
+                        <!-- Milestone rows -->
+                        <div class="space-y-2">
+                            <template x-for="(ms, idx) in milestones" :key="idx">
+                                <div class="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
+                                    <!-- Type -->
+                                    <select x-model="ms.type"
+                                            class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gdms-blue w-24 shrink-0">
+                                        <option value="PROD">PROD</option>
+                                        <option value="FAI">FAI</option>
+                                        <option value="NRE">NRE</option>
+                                        <option value="ECO">ECO</option>
+                                        <option value="QUAL">QUAL</option>
+                                    </select>
+                                    <!-- Name -->
+                                    <input type="text" x-model="ms.name"
+                                           placeholder="Milestone name"
+                                           class="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue"/>
+                                    <!-- Target date -->
+                                    <input type="date" x-model="ms.target_date"
+                                           class="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue w-36 shrink-0"/>
+                                    <!-- Remove -->
+                                    <button type="button"
+                                            @click="removeMilestone(idx)"
+                                            class="text-gray-400 hover:text-red-500 transition shrink-0">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </template>
+                            <p x-show="milestones.length === 0"
+                               class="text-xs text-gray-400 italic">No milestones added yet.</p>
+                        </div>
+                    </div>
+
+                    <!-- Scope changes -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Scope Changes</label>
+                        <textarea x-model="form.scope_changes"
+                                  rows="3"
+                                  placeholder="Describe any scope changes, ECO impacts, or contract modifications..."
+                                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue resize-none"></textarea>
+                    </div>
+
+                    <!-- Notes -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                        <textarea x-model="form.notes"
+                                  rows="2"
+                                  placeholder="Additional context for functional managers and leadership..."
+                                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gdms-blue resize-none"></textarea>
+                    </div>
+                </div>
+
+                <!-- Modal footer -->
+                <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+                    <button type="button"
+                            @click="showModal = false"
+                            class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium transition">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            @click="saveSignal(false)"
+                            :disabled="submitting"
+                            class="px-4 py-2 text-sm border border-gdms-blue text-gdms-blue rounded-lg font-medium hover:bg-blue-50 transition disabled:opacity-50">
+                        <span x-show="!submitting">Save Draft</span>
+                        <span x-show="submitting">Saving...</span>
+                    </button>
+                    <button type="button"
+                            @click="saveSignal(true)"
+                            :disabled="submitting"
+                            class="px-4 py-2 text-sm bg-gdms-blue text-white rounded-lg font-medium hover:bg-gdms-blue-light transition disabled:opacity-50">
+                        <span x-show="!submitting">Save &amp; Submit</span>
+                        <span x-show="submitting">Submitting...</span>
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <!-- /New Signal Modal -->
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- View Signal Detail Modal                                            -->
+    <!-- ------------------------------------------------------------------ -->
+    <div x-show="viewSignal"
+         x-cloak
+         class="fixed inset-0 z-50 overflow-y-auto"
+         @keydown.escape.window="viewSignal = null">
+
+        <div class="fixed inset-0 bg-black bg-opacity-40 transition-opacity"
+             @click="viewSignal = null"></div>
+
+        <div class="relative min-h-screen flex items-start justify-center pt-12 pb-20 px-4">
+            <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-lg"
+                 @click.stop>
+
+                <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gdms-blue rounded-t-xl">
+                    <h2 class="text-lg font-semibold text-white">Demand Signal Detail</h2>
+                    <button @click="viewSignal = null"
+                            class="text-blue-200 hover:text-white transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="px-6 py-5 space-y-4 text-sm" x-show="viewSignal">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Program</span>
+                            <p class="font-semibold text-gdms-blue mt-0.5" x-text="viewSignal?.program"></p>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Quarter</span>
+                            <p class="font-semibold mt-0.5" x-text="viewSignal?.quarter"></p>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Period</span>
+                            <p class="mt-0.5" x-text="(viewSignal?.period_start || '') + ' to ' + (viewSignal?.period_end || '')"></p>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Units in Flow</span>
+                            <p class="font-semibold mt-0.5" x-text="viewSignal?.units_in_flow ?? '—'"></p>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Status</span>
+                            <p class="mt-0.5 capitalize" x-text="viewSignal?.status"></p>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Created</span>
+                            <p class="mt-0.5" x-text="viewSignal?.created"></p>
+                        </div>
+                    </div>
+
+                    <template x-if="viewMilestones.length > 0">
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Milestones</span>
+                            <ul class="mt-1 space-y-1">
+                                <template x-for="ms in viewMilestones" :key="ms.name">
+                                    <li class="flex items-center gap-2 text-gray-700">
+                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" x-text="ms.type"></span>
+                                        <span x-text="ms.name"></span>
+                                        <span class="text-gray-400 text-xs" x-text="ms.target_date ? '(' + ms.target_date + ')' : ''"></span>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
+
+                    <template x-if="viewSignal?.scope_changes">
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Scope Changes</span>
+                            <p class="mt-0.5 text-gray-700 whitespace-pre-line" x-text="viewSignal.scope_changes"></p>
+                        </div>
+                    </template>
+
+                    <template x-if="viewSignal?.notes">
+                        <div>
+                            <span class="text-gray-500 text-xs uppercase tracking-wide">Notes</span>
+                            <p class="mt-0.5 text-gray-700 whitespace-pre-line" x-text="viewSignal.notes"></p>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="flex items-center justify-end px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+                    <button @click="viewSignal = null"
+                            class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium transition">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- /View Signal Modal -->
+
+</div>
+{% endblock %}

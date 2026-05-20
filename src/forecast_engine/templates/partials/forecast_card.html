@@ -1,0 +1,88 @@
+<!-- Forecast card for a single program -->
+<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5 hover:shadow-md transition"
+     id="forecast-card-{{ program.id }}">
+    <div class="flex items-center justify-between mb-4">
+        <div>
+            <a href="/programs/{{ program.id }}"
+               class="font-semibold text-gdms-blue hover:underline text-lg">
+                {{ program.code }} — {{ program.name }}
+            </a>
+            {% if program.pm_user %}
+            <p class="text-gray-400 text-xs">PM: {{ program.pm_user.display_name }}</p>
+            {% endif %}
+        </div>
+        <div class="flex items-center gap-2">
+            {% if forecast %}
+            <span class="text-xs text-gray-400">{{ forecast.period_label }}</span>
+            {% endif %}
+            <span class="text-xs px-2 py-1 rounded-full
+                {% if program.status == 'active' %}bg-green-100 text-green-700
+                {% elif program.status == 'closing' %}bg-amber-100 text-amber-700
+                {% else %}bg-gray-100 text-gray-500{% endif %}">
+                {{ program.status }}
+            </span>
+        </div>
+    </div>
+
+    {% if forecast %}
+    <div class="grid grid-cols-4 gap-3 text-center">
+        <!-- Rolling Average -->
+        <div class="bg-blue-50 rounded-lg p-3">
+            <div class="text-xs text-gray-500 mb-1">3mo Avg</div>
+            <div class="text-lg font-bold text-gdms-blue">
+                {{ "%.0f"|format(forecast.rolling_avg_hrs) if forecast.rolling_avg_hrs else '—' }}
+            </div>
+            <div class="text-xs text-gray-400">hrs</div>
+        </div>
+
+        <!-- Headcount Est (Tier 1) -->
+        <div class="bg-green-50 rounded-lg p-3">
+            <div class="text-xs text-gray-500 mb-1">Headcount</div>
+            <div class="text-lg font-bold text-accent-green">
+                {{ "%.0f"|format(forecast.headcount_hrs) if forecast.headcount_hrs else '—' }}
+            </div>
+            <div class="text-xs text-gray-400">{{ 'hrs' if forecast.headcount_hrs else 'no staffing' }}</div>
+        </div>
+
+        <!-- GBM Model (Tier 2) -->
+        <div class="bg-purple-50 rounded-lg p-3">
+            <div class="text-xs text-gray-500 mb-1">GBM Model</div>
+            <div class="text-lg font-bold text-purple-700">
+                {{ "%.0f"|format(forecast.gbm_hrs) if forecast.gbm_hrs else '—' }}
+            </div>
+            <div class="text-xs text-gray-400">{{ 'hrs' if forecast.gbm_hrs else 'no model' }}</div>
+        </div>
+
+        <!-- Actual (last period) -->
+        <div class="rounded-lg p-3 {% if forecast.variance_pct and forecast.variance_pct|abs > 20 %}bg-red-50{% else %}bg-gray-50{% endif %}">
+            <div class="text-xs text-gray-500 mb-1">Last Actual</div>
+            <div class="text-lg font-bold {% if forecast.variance_pct and forecast.variance_pct|abs > 20 %}text-accent-red{% else %}text-gray-700{% endif %}">
+                {{ "%.0f"|format(forecast.actual_hrs) if forecast.actual_hrs else '—' }}
+            </div>
+            <div class="text-xs text-gray-400">
+                {% if forecast.variance_pct %}
+                    {{ "%+.1f%%"|format(forecast.variance_pct) }} var
+                {% else %}
+                    hrs
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if forecast.bam_hrs or forecast.eng_hrs %}
+    <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+        <div class="text-xs text-gray-500">
+            BAM: {{ "%.0f"|format(forecast.bam_hrs) if forecast.bam_hrs else '0' }}h |
+            ENG: {{ "%.0f"|format(forecast.eng_hrs) if forecast.eng_hrs else '0' }}h
+        </div>
+        <a href="/programs/{{ program.id }}"
+           class="text-xs text-gdms-blue hover:underline">View Detail</a>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="text-center py-4 text-gray-400 text-sm">
+        No forecast data yet. Click <strong>Generate Forecasts</strong> above.
+    </div>
+    {% endif %}
+</div>

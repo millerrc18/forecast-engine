@@ -1,0 +1,434 @@
+{% extends "base.html" %}
+{% block title %}Staffing Allocations — Forecast Engine{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Page Header                                                          -->
+    <!-- ------------------------------------------------------------------ -->
+    <div>
+        <h1 class="text-2xl font-bold text-gdms-blue">Staffing Allocations</h1>
+        <p class="text-gray-500 text-sm mt-1">Respond to program demand signals — commit FTEs and allocation percentages per cost pool</p>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Pending Demand Signals                                               -->
+    <!-- ------------------------------------------------------------------ -->
+    {% if pending_signals %}
+    <div class="space-y-6">
+        <h2 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
+            Pending Demand Signals
+            <span class="ml-2 text-sm font-normal text-gray-500">({{ pending_signals | length }} awaiting response)</span>
+        </h2>
+
+        {% for signal in pending_signals %}
+        {# -- Quarter label -- #}
+        {% set ps = signal.period_start %}
+        {% set pe = signal.period_end %}
+        {% set m = ps.month %}
+        {% if m in (1, 2, 3) %}{% set q = 1 %}
+        {% elif m in (4, 5, 6) %}{% set q = 2 %}
+        {% elif m in (7, 8, 9) %}{% set q = 3 %}
+        {% else %}{% set q = 4 %}{% endif %}
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
+             x-data="{
+                 showForm: false,
+                 submitting: false,
+                 form: {
+                     cost_pool: 'BAMTL',
+                     fte_count: '',
+                     avg_allocation_pct: '',
+                     blended_rate: '',
+                     notes: ''
+                 },
+                 get plannedHrs() {
+                     const fte = parseFloat(this.form.fte_count) || 0;
+                     const pct = parseFloat(this.form.avg_allocation_pct) || 0;
+                     if (fte <= 0 || pct <= 0) return '—';
+                     return (Math.round(fte * (pct / 100) * 168 * 10) / 10).toFixed(1);
+                 },
+                 async saveAllocation(submitAfter) {
+                     if (!this.form.fte_count || parseFloat(this.form.fte_count) <= 0) {
+                         alert('Please enter a valid FTE count.'); return;
+                     }
+                     if (!this.form.avg_allocation_pct || parseFloat(this.form.avg_allocation_pct) <= 0) {
+                         alert('Please enter a valid allocation %.'); return;
+                     }
+                     this.submitting = true;
+                     const payload = {
+                         cost_pool: this.form.cost_pool,
+                         fte_count: parseFloat(this.form.fte_count),
+                         avg_allocation_pct: parseFloat(this.form.avg_allocation_pct),
+                         blended_rate: this.form.blended_rate ? parseFloat(this.form.blended_rate) : null,
+                         notes: this.form.notes || null,
+                     };
+                     try {
+                         const resp = await fetch('/api/demand-signals/{{ signal.id }}/allocations', {
+                             method: 'POST',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify(payload),
+                         });
+                         if (!resp.ok) {
+                             const err = await resp.json();
+                             alert('Error: ' + (err.detail || 'Could not save allocation.'));
+                             return;
+                         }
+                         if (submitAfter) {
+                             const created = await resp.json();
+                             const submitResp = await fetch(`/api/allocations/${created.id}/submit`, {
+                                 method: 'POST',
+                             });
+                             if (!submitResp.ok) {
+                                 alert('Saved as draft but could not submit. Use the Actions menu to submit.');
+                             }
+                         }
+                         window.location.reload();
+                     } catch (e) {
+                         alert('Network error. Please try again.');
+                     } finally {
+                         this.submitting = false;
+                     }
+                 },
+                 async submitAllocation(allocId) {
+                     if (!confirm('Submit this allocation? It will be locked for review.')) return;
+                     const resp = await fetch(`/api/allocations/${allocId}/submit`, { method: 'POST' });
+                     if (resp.ok) { window.location.reload(); }
+                     else { const e = await resp.json(); alert('Error: ' + (e.detail || 'Could not submit.')); }
+                 }
+             }">
+
+            <!-- Signal header -->
+            <div class="bg-gdms-blue px-5 py-4 flex items-start justify-between">
+                <div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-white font-bold text-base">{{ signal.program.code }}</span>
+                        <span class="text-blue-200 text-sm">{{ signal.program.name }}</span>
+                        <span class="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full">
+                            Q{{ q }} FY{{ ps.year % 100 }}
+                        </span>
+                    </div>
+                    <p class="text-blue-300 text-xs mt-1">
+                        {{ ps.strftime('%b %d') }}–{{ pe.strftime('%b %d, %Y') }}
+                        &nbsp;·&nbsp; Submitted by {{ signal.submitter.display_name if signal.submitter else 'Unknown' }}
+                    </p>
+                </div>
+                <button @click="showForm = !showForm"
+                        class="bg-white text-gdms-blue text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-50 transition flex items-center gap-1.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Add Allocation
+                </button>
+            </div>
+
+            <!-- Demand signal context -->
+            <div class="px-5 py-4 border-b border-gray-100 grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50">
+                <!-- Units in flow -->
+                <div>
+                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Units in Flow</p>
+                    <p class="text-2xl font-bold text-gdms-blue mt-0.5">
+                        {{ signal.units_in_flow if signal.units_in_flow is not none else '—' }}
+                    </p>
+                </div>
+
+                <!-- Milestones -->
+                <div>
+                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Milestones</p>
+                    {% if signal.milestones %}
+                    {% set ms_list = signal.milestones | from_json %}
+                    {% if ms_list %}
+                    <ul class="space-y-0.5">
+                        {% for ms in ms_list[:4] %}
+                        <li class="text-xs text-gray-700 flex items-center gap-1.5">
+                            <span class="inline-block bg-gdms-blue text-white text-xs px-1.5 py-0.5 rounded font-mono">{{ ms.type }}</span>
+                            {{ ms.name }}
+                            {% if ms.target_date %}<span class="text-gray-400">{{ ms.target_date }}</span>{% endif %}
+                        </li>
+                        {% endfor %}
+                        {% if ms_list | length > 4 %}
+                        <li class="text-xs text-gray-400">+{{ ms_list | length - 4 }} more</li>
+                        {% endif %}
+                    </ul>
+                    {% else %}
+                    <p class="text-xs text-gray-400 italic">No milestones specified</p>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-xs text-gray-400 italic">No milestones specified</p>
+                    {% endif %}
+                </div>
+
+                <!-- Scope changes / notes -->
+                <div>
+                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Scope / Notes</p>
+                    {% if signal.scope_changes %}
+                    <p class="text-xs text-gray-700 line-clamp-3">{{ signal.scope_changes }}</p>
+                    {% elif signal.notes %}
+                    <p class="text-xs text-gray-700 line-clamp-3">{{ signal.notes }}</p>
+                    {% else %}
+                    <p class="text-xs text-gray-400 italic">No scope notes</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Existing allocations for this signal -->
+            {% set signal_allocs = signal.allocations %}
+            {% if signal_allocs %}
+            <div class="px-5 py-3">
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Existing Allocations</p>
+                <table class="min-w-full text-sm divide-y divide-gray-100">
+                    <thead>
+                        <tr class="text-xs text-gray-500 font-medium">
+                            <th class="py-2 pr-4 text-left">Cost Pool</th>
+                            <th class="py-2 pr-4 text-right">FTEs</th>
+                            <th class="py-2 pr-4 text-right">Alloc %</th>
+                            <th class="py-2 pr-4 text-right">Rate ($/hr)</th>
+                            <th class="py-2 pr-4 text-right">Planned Hrs/Mo</th>
+                            <th class="py-2 pr-4 text-left">Status</th>
+                            <th class="py-2 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50">
+                        {% for alloc in signal_allocs %}
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="py-2 pr-4">
+                                <span class="font-mono text-xs font-semibold text-gdms-blue bg-blue-50 px-2 py-0.5 rounded">
+                                    {{ alloc.cost_pool }}
+                                </span>
+                            </td>
+                            <td class="py-2 pr-4 text-right text-gray-800 font-medium">{{ alloc.fte_count }}</td>
+                            <td class="py-2 pr-4 text-right text-gray-800">{{ alloc.avg_allocation_pct }}%</td>
+                            <td class="py-2 pr-4 text-right text-gray-600">
+                                {{ '$%.2f' | format(alloc.blended_rate | float) if alloc.blended_rate else '—' }}
+                            </td>
+                            <td class="py-2 pr-4 text-right text-gray-800 font-medium">
+                                {{ '%.1f' | format(alloc.planned_hrs_per_month | float) if alloc.planned_hrs_per_month else '—' }}
+                            </td>
+                            <td class="py-2 pr-4">
+                                {% if alloc.status == 'draft' %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">Draft</span>
+                                {% elif alloc.status == 'submitted' %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Submitted</span>
+                                {% elif alloc.status == 'accepted' %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Accepted</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-2">
+                                {% if alloc.status == 'draft' and alloc.submitted_by == user.id %}
+                                <button @click="submitAllocation('{{ alloc.id }}')"
+                                        class="text-blue-600 hover:text-blue-800 text-xs font-medium">
+                                    Submit
+                                </button>
+                                {% else %}
+                                <span class="text-gray-300 text-xs">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="px-5 py-4">
+                <p class="text-sm text-gray-400 italic">No allocations yet for this signal.</p>
+            </div>
+            {% endif %}
+
+            <!-- Add Allocation form (collapsible) -->
+            <div x-show="showForm"
+                 x-cloak
+                 x-transition:enter="transition ease-out duration-150"
+                 x-transition:enter-start="opacity-0 -translate-y-1"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 class="border-t border-gray-200 bg-blue-50 px-5 py-5">
+
+                <h3 class="text-sm font-semibold text-gdms-blue mb-4">Add Staffing Allocation</h3>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+
+                    <!-- Cost Pool -->
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">
+                            Cost Pool <span class="text-red-500">*</span>
+                        </label>
+                        <select x-model="form.cost_pool"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gdms-blue">
+                            <option value="BAMTL">BAMTL</option>
+                            <option value="ENGTL">ENGTL</option>
+                        </select>
+                    </div>
+
+                    <!-- FTE Count -->
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">
+                            FTE Count <span class="text-red-500">*</span>
+                        </label>
+                        <input type="number"
+                               x-model="form.fte_count"
+                               min="0.5" step="0.5"
+                               placeholder="e.g. 3.5"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gdms-blue"/>
+                    </div>
+
+                    <!-- Avg Allocation % -->
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">
+                            Avg Allocation % <span class="text-red-500">*</span>
+                        </label>
+                        <div class="relative">
+                            <input type="number"
+                                   x-model="form.avg_allocation_pct"
+                                   min="1" max="100" step="1"
+                                   placeholder="e.g. 80"
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gdms-blue"/>
+                            <span class="absolute right-3 top-2.5 text-gray-400 text-sm">%</span>
+                        </div>
+                    </div>
+
+                    <!-- Blended Rate -->
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">
+                            Blended Rate ($/hr)
+                            <span class="text-gray-400 font-normal">optional</span>
+                        </label>
+                        <div class="relative">
+                            <span class="absolute left-3 top-2.5 text-gray-400 text-sm">$</span>
+                            <input type="number"
+                                   x-model="form.blended_rate"
+                                   min="0" step="0.01"
+                                   placeholder="e.g. 125.00"
+                                   class="w-full border border-gray-300 rounded-lg px-3 pl-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gdms-blue"/>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Planned hours (computed, read-only display) -->
+                <div class="flex items-center gap-3 mb-4 bg-white rounded-lg border border-gray-200 px-4 py-3">
+                    <svg class="w-4 h-4 text-gdms-blue shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    <span class="text-sm text-gray-600">
+                        Planned hrs/month:
+                        <strong class="text-gdms-blue ml-1" x-text="plannedHrs">—</strong>
+                    </span>
+                    <span class="text-xs text-gray-400">(FTEs × alloc% × 168 hrs)</span>
+                </div>
+
+                <!-- Notes -->
+                <div class="mb-5">
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                    <textarea x-model="form.notes"
+                              rows="2"
+                              placeholder="Constraints, assumptions, or caveats..."
+                              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gdms-blue resize-none"></textarea>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="flex items-center gap-3">
+                    <button type="button"
+                            @click="showForm = false"
+                            class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium transition">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            @click="saveAllocation(false)"
+                            :disabled="submitting"
+                            class="px-4 py-2 text-sm border border-gdms-blue text-gdms-blue bg-white rounded-lg font-medium hover:bg-blue-50 transition disabled:opacity-50">
+                        <span x-show="!submitting">Save Draft</span>
+                        <span x-show="submitting">Saving...</span>
+                    </button>
+                    <button type="button"
+                            @click="saveAllocation(true)"
+                            :disabled="submitting"
+                            class="px-4 py-2 text-sm bg-gdms-blue text-white rounded-lg font-medium hover:bg-gdms-blue-light transition disabled:opacity-50">
+                        <span x-show="!submitting">Save &amp; Submit</span>
+                        <span x-show="submitting">Submitting...</span>
+                    </button>
+                </div>
+            </div>
+            <!-- /Add Allocation form -->
+
+        </div>
+        {% endfor %}
+    </div>
+
+    {% else %}
+    <!-- No pending signals -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+        <svg class="mx-auto h-12 w-12 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        <p class="text-gray-500 font-medium">No pending demand signals</p>
+        <p class="text-gray-400 text-sm mt-1">Program managers haven't submitted any signals requiring staffing responses yet.</p>
+    </div>
+    {% endif %}
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- My Submitted Allocations (history)                                   -->
+    <!-- ------------------------------------------------------------------ -->
+    {% if my_allocations %}
+    <div>
+        <h2 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">My Allocations</h2>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gdms-blue text-white">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-medium">Program</th>
+                        <th class="px-4 py-3 text-left font-medium">Quarter</th>
+                        <th class="px-4 py-3 text-left font-medium">Cost Pool</th>
+                        <th class="px-4 py-3 text-right font-medium">FTEs</th>
+                        <th class="px-4 py-3 text-right font-medium">Alloc %</th>
+                        <th class="px-4 py-3 text-right font-medium">Planned Hrs/Mo</th>
+                        <th class="px-4 py-3 text-center font-medium">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for alloc in my_allocations %}
+                    {% set s = alloc.demand_signal %}
+                    {% if s %}
+                    {% set ps = s.period_start %}
+                    {% set m = ps.month %}
+                    {% if m in (1, 2, 3) %}{% set q = 1 %}
+                    {% elif m in (4, 5, 6) %}{% set q = 2 %}
+                    {% elif m in (7, 8, 9) %}{% set q = 3 %}
+                    {% else %}{% set q = 4 %}{% endif %}
+                    <tr class="hover:bg-gray-50 transition">
+                        <td class="px-4 py-3">
+                            <span class="font-semibold text-gdms-blue">{{ alloc.program.code if alloc.program else '—' }}</span>
+                        </td>
+                        <td class="px-4 py-3 text-gray-700 whitespace-nowrap">
+                            Q{{ q }} FY{{ ps.year % 100 }}
+                        </td>
+                        <td class="px-4 py-3">
+                            <span class="font-mono text-xs font-semibold text-gdms-blue bg-blue-50 px-2 py-0.5 rounded">
+                                {{ alloc.cost_pool }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-right text-gray-800 font-medium">{{ alloc.fte_count }}</td>
+                        <td class="px-4 py-3 text-right text-gray-800">{{ alloc.avg_allocation_pct }}%</td>
+                        <td class="px-4 py-3 text-right text-gray-800 font-medium">
+                            {{ '%.1f' | format(alloc.planned_hrs_per_month | float) if alloc.planned_hrs_per_month else '—' }}
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            {% if alloc.status == 'draft' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">Draft</span>
+                            {% elif alloc.status == 'submitted' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Submitted</span>
+                            {% elif alloc.status == 'accepted' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Accepted</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
